@@ -1,48 +1,81 @@
-var client_id = 'ac02f0e6ddd648388883e00b481044f7';
-var redirect_uri = 'http://localhost:3000/';
-let accessToken = '';
+const clientId = 'ac02f0e6ddd648388883e00b481044f7';
+const redirectUri = 'someJammyJam.surge.sh';
+let accessToken;
 
 const Spotify = {
     
     getAccessToken() {
-        if(accessToken !== null) {
+        if(accessToken) {
             return accessToken;
         }
-        const url = window.location.href;
-        if (url.match('/access_token=([^&]*)/') && url.match('/expires_in=([^&]*)/')){
-            accessToken = url.match('/access_token=([^&]*)/');
-            const expiresIn = url.match('/expires_in=([^&]*)/');
+
+        const accessTokenMatch = window.location.href.match(/access_token=([^&]*)/);
+        const expiresInMatch = window.location.href.match(/expires_in=([^&]*)/);
+        if (accessTokenMatch && expiresInMatch){
+            accessToken = accessTokenMatch[1];
+            const expiresIn = Number(expiresInMatch[1]);
+            // clears parameters
             window.setTimeout(() => accessToken = '', expiresIn * 1000);
             window.history.pushState('Access Token', null, '/');
+            return accessToken;
         }
-        if (accessToken === '') {
-            accessToken = `https://accounts.spotify.com/authorize?client_id=${client_id}&response_type=token&scope=playlist-modify-public&redirect_uri=${redirect_uri}`;
-        }
-        return accessToken;
+
+        window.location.href = `https://accounts.spotify.com/authorize?client_id=${clientId}&response_type=token&scope=playlist-modify-public&redirect_uri=${redirectUri}`;
+
     },
 
     search(term) {
-            fetch(`https://api.spotify.com/v1/search?type=track&q=${term}`,
+        const accessToken = Spotify.getAccessToken();
+        return fetch(`https://api.spotify.com/v1/search?type=track&q=${term}`,
             {
-                headers: {Authorization: `Bearer ${accessToken}`}
-            })
-            .then(
-                response => {
-                    if(response.ok) {
-                        return response.json().map(track => track);
-                    }
-                    throw new Error('Request failed!');
+            headers: {Authorization: `Bearer ${accessToken}`}
+            }).then(response => { 
+                return response.json();
+            }).then(jsonResponse => {
+                if(!jsonResponse.tracks){
+                    return [];
                 }
-            )
-        
+                return jsonResponse.tracks.items.map(track => ({
+                    id: track.id,
+                    name: track.name,
+                    artist: track.artists[0].name,
+                    album: track.album.name,
+                    uri: track.uri
+                }))
+            })
     },
 
-    savePlaylist(playlistName, trackURI) {
-        let userToken = accessToken;
-        const headers = {Authorization: `${accessToken}`};
-        let userID;
+    savePlaylist(name, trackUris) {
+        if(!name || !trackUris.length){
+            return;
+        }
+        const accessToken = Spotify.getAccessToken();
+        const headers = {Authorization: `Bearer ${accessToken}`};
+        let  userId;
 
-        fetch()
+        return fetch('https://api.spotify.com/v1/me', {headers: headers})
+        .then(response => {
+            if(response.ok){
+                return response.json();
+            }
+        }).then(jsonResponse => {
+            userId = jsonResponse.id;
+            return fetch(`https://api.spotify.com/v1/users/${userId}/playlists`, 
+            {
+                headers: headers,
+                method: 'POST',
+                body: JSON.stringify({ name: name})
+            }).then(response => response.json())
+            .then(jsonResponse => {
+                const playlistID = jsonResponse.id;
+                return fetch(`https://api.spotify.com/v1/users/${userId}/playlists/${playlistID}/tracks`,
+                {
+                    headers: headers,
+                    method: 'POST',
+                    body: JSON.stringify({ uris: trackUris})
+                });
+            });
+        });
     }
 
 };
